@@ -1,8 +1,8 @@
 """
 ui.py
 -----
-Streamlit dashboard that stitches together the graph model, routing,
-assignment, analytics, and simulation layers into a cohesive demo.
+Enhanced Streamlit dashboard for Emergency Ambulance Dispatch Optimization
+with advanced analytics, performance comparisons, and real-time monitoring.
 """
 from __future__ import annotations
 
@@ -10,11 +10,15 @@ import json
 import math
 import random
 import time
+from collections import deque
+from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 import streamlit as st
 
 from graph_model import GraphModel, GridNode
@@ -31,52 +35,128 @@ st.set_page_config(
 
 
 def _inject_global_styles() -> None:
-    """Global CSS to give the app a modern dark dashboard look."""
+    """Enhanced global CSS for a modern, professional dashboard look."""
     st.markdown(
         """
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
         .main {
-            background: radial-gradient(circle at top left, #1e293b 0, #020617 55%);
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
         }
         section[data-testid="stSidebar"] {
-            background-color: #020617 !important;
-            border-right: 1px solid #1f2933;
+            background: linear-gradient(180deg, #020617 0%, #0f172a 100%) !important;
+            border-right: 2px solid rgba(59, 130, 246, 0.3);
         }
         .stMetric {
-            background: linear-gradient(135deg, #0f172a, #020617);
-            padding: 0.75rem 0.9rem;
-            border-radius: 0.75rem;
-            border: 1px solid rgba(148, 163, 184, 0.35);
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.9));
+            padding: 1rem 1.2rem;
+            border-radius: 1rem;
+            border: 1px solid rgba(59, 130, 246, 0.4);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3), 0 0 20px rgba(59, 130, 246, 0.1);
+            transition: all 0.3s ease;
+        }
+        .stMetric:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 12px rgba(0, 0, 0, 0.4), 0 0 30px rgba(59, 130, 246, 0.2);
+            border-color: rgba(59, 130, 246, 0.6);
         }
         .stMetric label {
-            font-size: 0.78rem;
+            font-size: 0.75rem;
             text-transform: uppercase;
-            letter-spacing: .12em;
-            color: #9ca3af;
+            letter-spacing: 0.15em;
+            color: #94a3b8;
+            font-weight: 600;
         }
         .stMetric [data-testid="stMetricValue"] {
             font-weight: 700;
-            font-size: 1.1rem;
-            color: #e5e7eb;
+            font-size: 1.5rem;
+            color: #f1f5f9;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        .stMetric [data-testid="stMetricDelta"] {
+            font-size: 0.9rem;
         }
         div[data-testid="stDataFrame"] {
-            border-radius: 0.75rem;
-            border: 1px solid rgba(148, 163, 184, 0.4);
+            border-radius: 1rem;
+            border: 1px solid rgba(59, 130, 246, 0.4);
             overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
         }
         .stButton>button, .stDownloadButton>button {
-            border-radius: 999px;
-            border: 1px solid rgba(148, 163, 184, 0.35);
-            background: radial-gradient(circle at top left, #38bdf8, #0ea5e9);
-            color: #0b1120;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(59, 130, 246, 0.5);
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: #ffffff;
             font-weight: 600;
+            padding: 0.5rem 1.5rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
         .stButton>button:hover, .stDownloadButton>button:hover {
-            border-color: #fbbf24;
-            box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.35);
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            border-color: #60a5fa;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.4);
+            transform: translateY(-1px);
         }
         h1, h2, h3 {
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+            color: #f1f5f9;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 0.5rem;
+            background-color: rgba(15, 23, 42, 0.6);
+            padding: 0.5rem;
+            border-radius: 0.75rem;
+        }
+        .stTabs [data-baseweb="tab"] {
+            background-color: rgba(30, 41, 59, 0.5);
+            border-radius: 0.5rem;
+            padding: 0.5rem 1.5rem;
+            color: #94a3b8;
+            font-weight: 600;
+            border: 1px solid transparent;
+            transition: all 0.3s ease;
+        }
+        .stTabs [data-baseweb="tab"]:hover {
+            background-color: rgba(51, 65, 85, 0.8);
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+        .stTabs [aria-selected="true"] {
+            background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+            color: #ffffff !important;
+            border-color: #60a5fa !important;
+        }
+        .info-card {
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.9));
+            padding: 1.5rem;
+            border-radius: 1rem;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            margin: 1rem 0;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+        .alert-critical {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.2));
+            border-left: 4px solid #ef4444;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin: 0.5rem 0;
+        }
+        .alert-warning {
+            background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.2));
+            border-left: 4px solid #fbbf24;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin: 0.5rem 0;
+        }
+        .alert-success {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(22, 163, 74, 0.2));
+            border-left: 4px solid #22c55e;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin: 0.5rem 0;
         }
         </style>
         """,
@@ -157,6 +237,35 @@ def _log_metric_history(sim_snapshot: Dict) -> None:
         active_history.pop(0)
 
 
+def _add_event_to_timeline(event_type: str, message: str, severity: str = "info") -> None:
+    """Add event to timeline with timestamp."""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    event = {
+        "time": timestamp,
+        "type": event_type,
+        "message": message,
+        "severity": severity
+    }
+    st.session_state.event_timeline.append(event)
+    
+    # Add to notifications if important
+    if severity in ["warning", "critical"]:
+        st.session_state.notifications.append(event)
+        if severity == "critical":
+            st.session_state.critical_events += 1
+
+
+def _log_algorithm_performance(algorithm: str, execution_time: float, cost: float) -> None:
+    """Log algorithm performance metrics for comparison."""
+    if algorithm in st.session_state.algorithm_comparison:
+        st.session_state.algorithm_comparison[algorithm]["times"].append(execution_time)
+        st.session_state.algorithm_comparison[algorithm]["costs"].append(cost)
+        # Keep only last 100 measurements
+        if len(st.session_state.algorithm_comparison[algorithm]["times"]) > 100:
+            st.session_state.algorithm_comparison[algorithm]["times"].pop(0)
+            st.session_state.algorithm_comparison[algorithm]["costs"].pop(0)
+
+
 # ------------------------------------------------------------------ #
 # Session bootstrap
 # ------------------------------------------------------------------ #
@@ -175,6 +284,17 @@ def init_state() -> None:
     st.session_state.manual_emergency_lon = st.session_state.get("manual_emergency_lon", 72.877)
     st.session_state.manual_emergency_urgency = st.session_state.get("manual_emergency_urgency", 3)
     st.session_state.emergency_lookup: Dict[int, Dict] = {}
+    # Enhanced features state
+    st.session_state.event_timeline = deque(maxlen=50)
+    st.session_state.notifications = deque(maxlen=10)
+    st.session_state.performance_log = {"dijkstra": [], "astar": []}
+    st.session_state.algorithm_comparison = {"dijkstra": {"times": [], "costs": []}, "astar": {"times": [], "costs": []}}
+    st.session_state.show_traffic_heatmap = False
+    st.session_state.show_notifications = True
+    st.session_state.critical_events = 0
+    st.session_state.total_resolved = 0
+    st.session_state.best_response_time = float('inf')
+    st.session_state.worst_response_time = 0.0
     set_environment(st.session_state.map_source, st.session_state.route_algo, st.session_state.assignment_method)
     st.session_state.initialized = True
 
@@ -268,6 +388,13 @@ def add_emergency(location: GridNode | None = None, urgency: int | None = None) 
         "location": location,
         "urgency": urgency,
     }
+    # Log event to timeline
+    severity = "critical" if urgency >= 4 else "warning" if urgency >= 3 else "info"
+    _add_event_to_timeline(
+        "emergency",
+        f"🚨 New emergency (Urgency: {urgency}) at location {location}",
+        severity
+    )
 
 
 def cleanup_resolved_emergencies() -> None:
@@ -278,6 +405,22 @@ def cleanup_resolved_emergencies() -> None:
     for dispatch_id, info in list(st.session_state.emergency_lookup.items()):
         if info["sim_id"] in resolved_sim_ids:
             st.session_state.emergency_lookup.pop(dispatch_id)
+            st.session_state.total_resolved += 1
+            
+            # Track response time
+            event = sim.emergencies[info["sim_id"]]
+            if hasattr(event, 'response_time') and event.response_time:
+                response_time = event.response_time
+                if response_time < st.session_state.best_response_time:
+                    st.session_state.best_response_time = response_time
+                if response_time > st.session_state.worst_response_time:
+                    st.session_state.worst_response_time = response_time
+            
+            _add_event_to_timeline(
+                "resolution",
+                f"✅ Emergency {dispatch_id} resolved (Urgency: {info['urgency']})",
+                "success"
+            )
 
 
 def run_steps(iterations: int = 15) -> None:
@@ -285,13 +428,35 @@ def run_steps(iterations: int = 15) -> None:
     dispatcher: RealtimeDispatcher = st.session_state.dispatcher
     dt = 0.25 if st.session_state.speed == "Real-time" else 0.4
     sleep_time = 0.04 if st.session_state.speed == "Real-time" else 0.005
+    
     for _ in range(iterations):
         sync_dispatcher_with_sim()
+        
+        # Time the rebalance operation
+        start_time = time.time()
         dispatcher.rebalance_assignments()
+        execution_time = time.time() - start_time
+        
+        # Log performance if assignments were made
+        if dispatcher.history:
+            latest = dispatcher.history[-1]
+            _log_algorithm_performance(
+                st.session_state.route_algo,
+                execution_time,
+                latest.total_cost
+            )
+        
         apply_dispatcher_paths_to_sim()
         completed = sim.tick(dt)
+        
         for amb_id in completed:
             dispatcher.release_ambulance(amb_id)
+            _add_event_to_timeline(
+                "ambulance",
+                f"🚑 Ambulance {amb_id} completed assignment",
+                "info"
+            )
+        
         cleanup_resolved_emergencies()
         time.sleep(sleep_time)
 
@@ -312,6 +477,269 @@ def add_ambulance_unit() -> None:
 # ------------------------------------------------------------------ #
 # Rendering helpers
 # ------------------------------------------------------------------ #
+def render_notifications() -> None:
+    """Display real-time notifications sidebar."""
+    if not st.session_state.show_notifications or not st.session_state.notifications:
+        return
+    
+    st.sidebar.markdown("### 🔔 Notifications")
+    for notif in reversed(list(st.session_state.notifications)):
+        severity_class = f"alert-{notif['severity']}"
+        icon = "🚨" if notif['severity'] == 'critical' else "⚠️" if notif['severity'] == 'warning' else "ℹ️"
+        st.sidebar.markdown(
+            f'<div class="{severity_class}"><small>{notif["time"]}</small><br>{icon} {notif["message"]}</div>',
+            unsafe_allow_html=True
+        )
+
+
+def render_event_timeline() -> None:
+    """Display chronological event timeline."""
+    st.subheader("📋 Event Timeline")
+    
+    if not st.session_state.event_timeline:
+        st.info("Events will appear here as the simulation runs.")
+        return
+    
+    timeline_df = pd.DataFrame(list(st.session_state.event_timeline))
+    timeline_df['severity_color'] = timeline_df['severity'].map({
+        'critical': '🔴',
+        'warning': '🟡',
+        'info': '🟢',
+        'success': '🟢'
+    })
+    
+    display_df = timeline_df[['time', 'severity_color', 'message']].tail(20)
+    display_df.columns = ['Time', 'Level', 'Event']
+    st.dataframe(display_df, hide_index=True, use_container_width=True)
+
+
+def render_traffic_heatmap() -> go.Figure:
+    """Create traffic density heatmap overlay."""
+    model: GraphModel = st.session_state.model
+    
+    # Get edge traffic data
+    traffic_data = []
+    positions = getattr(model, "positions", None) or {}
+    
+    for (u, v), edge_data in model.graph.edges.items():
+        if u in positions and v in positions:
+            # Extract numeric weight from edge data
+            if isinstance(edge_data, dict):
+                weight = edge_data.get('weight', 1.0)
+            elif isinstance(edge_data, (int, float)):
+                weight = float(edge_data)
+            else:
+                weight = 1.0
+            
+            u_pos = _coerce_point(positions[u])
+            v_pos = _coerce_point(positions[v])
+            mid_x = (u_pos[0] + v_pos[0]) / 2
+            mid_y = (u_pos[1] + v_pos[1]) / 2
+            traffic_data.append({
+                'lon': mid_x,
+                'lat': mid_y,
+                'traffic': weight
+            })
+    
+    if not traffic_data:
+        return go.Figure()
+    
+    df = pd.DataFrame(traffic_data)
+    
+    fig = go.Figure()
+    
+    if not model.grid_mode:
+        fig.add_trace(go.Densitymapbox(
+            lon=df['lon'],
+            lat=df['lat'],
+            z=df['traffic'],
+            radius=15,
+            colorscale='Reds',
+            showscale=True,
+            colorbar=dict(title="Traffic Density"),
+        ))
+        
+        center_lat = float(df['lat'].mean())
+        center_lon = float(df['lon'].mean())
+        
+        fig.update_layout(
+            mapbox=dict(
+                style="open-street-map",
+                center=dict(lat=center_lat, lon=center_lon),
+                zoom=11,
+            ),
+            height=500,
+            margin=dict(l=0, r=0, t=30, b=0),
+            title="Traffic Density Heatmap",
+            paper_bgcolor="#0f172a",
+            font=dict(color="#f8fafc"),
+        )
+    else:
+        fig = px.density_heatmap(
+            df, x='lon', y='lat', z='traffic',
+            color_continuous_scale='Reds',
+            title="Traffic Density Heatmap"
+        )
+        fig.update_layout(
+            height=500,
+            paper_bgcolor="#0f172a",
+            plot_bgcolor="#0f172a",
+            font=dict(color="#f8fafc"),
+        )
+    
+    return fig
+
+
+def render_performance_comparison() -> None:
+    """Display algorithm performance comparison dashboard."""
+    st.subheader("⚡ Algorithm Performance Comparison")
+    
+    comparison = st.session_state.algorithm_comparison
+    
+    col1, col2 = st.columns(2)
+    
+    # Execution time comparison
+    with col1:
+        st.markdown("**Average Execution Time**")
+        time_data = []
+        for algo, data in comparison.items():
+            if data["times"]:
+                avg_time = np.mean(data["times"]) * 1000  # Convert to ms
+                time_data.append({"Algorithm": algo.upper(), "Avg Time (ms)": avg_time})
+        
+        if time_data:
+            df_time = pd.DataFrame(time_data)
+            fig_time = px.bar(
+                df_time, x='Algorithm', y='Avg Time (ms)',
+                color='Algorithm',
+                color_discrete_map={'DIJKSTRA': '#3b82f6', 'ASTAR': '#22c55e'}
+            )
+            fig_time.update_layout(
+                showlegend=False,
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='#f8fafc'),
+                height=300
+            )
+            st.plotly_chart(fig_time, use_container_width=True)
+        else:
+            st.info("Performance data will appear after running simulations.")
+    
+    # Cost comparison
+    with col2:
+        st.markdown("**Average Assignment Cost**")
+        cost_data = []
+        for algo, data in comparison.items():
+            if data["costs"]:
+                avg_cost = np.mean(data["costs"])
+                cost_data.append({"Algorithm": algo.upper(), "Avg Cost": avg_cost})
+        
+        if cost_data:
+            df_cost = pd.DataFrame(cost_data)
+            fig_cost = px.bar(
+                df_cost, x='Algorithm', y='Avg Cost',
+                color='Algorithm',
+                color_discrete_map={'DIJKSTRA': '#3b82f6', 'ASTAR': '#22c55e'}
+            )
+            fig_cost.update_layout(
+                showlegend=False,
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='#f8fafc'),
+                height=300
+            )
+            st.plotly_chart(fig_cost, use_container_width=True)
+        else:
+            st.info("Cost data will appear after running simulations.")
+    
+    # Performance over time
+    st.markdown("**Performance Trend Over Time**")
+    
+    fig_trend = go.Figure()
+    
+    for algo, data in comparison.items():
+        if data["times"]:
+            fig_trend.add_trace(go.Scatter(
+                x=list(range(len(data["times"]))),
+                y=[t * 1000 for t in data["times"]],
+                mode='lines+markers',
+                name=algo.upper(),
+                line=dict(width=2)
+            ))
+    
+    fig_trend.update_layout(
+        xaxis_title="Iteration",
+        yaxis_title="Execution Time (ms)",
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#f8fafc'),
+        height=300,
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    if any(data["times"] for data in comparison.values()):
+        st.plotly_chart(fig_trend, use_container_width=True)
+    else:
+        st.info("Performance trends will appear as you run simulations with different algorithms.")
+
+
+def render_advanced_kpi_dashboard(sim_snapshot: Dict, dispatch_snapshot: Dict) -> None:
+    """Display comprehensive KPI dashboard."""
+    st.subheader("📊 Key Performance Indicators")
+    
+    metrics = sim_snapshot["metrics"]
+    
+    # Top row - Primary KPIs
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    response_time = metrics["average_response_time"]
+    col1.metric(
+        "Avg Response",
+        f"{response_time:.1f} min",
+        delta=f"{response_time - st.session_state.best_response_time:.1f}" if st.session_state.best_response_time != float('inf') else None
+    )
+    
+    total_ambulances = len(dispatch_snapshot["ambulances"])
+    available = sum(1 for amb in dispatch_snapshot["ambulances"] if amb["available"])
+    utilization = ((total_ambulances - available) / total_ambulances * 100) if total_ambulances > 0 else 0
+    col2.metric("Fleet Utilization", f"{utilization:.0f}%")
+    
+    active_emergencies = st.session_state.sim.active_emergencies()
+    col3.metric("Active Calls", active_emergencies)
+    
+    col4.metric("Total Resolved", st.session_state.total_resolved)
+    
+    col5.metric("Critical Events", st.session_state.critical_events)
+    
+    # Second row - Secondary metrics
+    st.markdown("---")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    distance_units = "blocks" if st.session_state.model.grid_mode else "km"
+    distance_display = metrics.get("distance_display", 0.0)
+    col1.metric("Distance Traveled", f"{distance_display:.1f} {distance_units}")
+    
+    sim_time = metrics.get("sim_time_minutes", 0.0)
+    col2.metric("Simulation Time", f"{sim_time:.1f} min")
+    
+    if st.session_state.best_response_time != float('inf'):
+        col3.metric("Best Response", f"{st.session_state.best_response_time:.1f} min")
+    else:
+        col3.metric("Best Response", "N/A")
+    
+    if st.session_state.worst_response_time > 0:
+        col4.metric("Worst Response", f"{st.session_state.worst_response_time:.1f} min")
+    else:
+        col4.metric("Worst Response", "N/A")
+
+
 def render_grid(snapshot: Dict, show_paths: bool, focus_ambulance: int | None = None) -> go.Figure:
     model: GraphModel = st.session_state.model
     coords = _coordinate_matrix(model)
@@ -535,6 +963,95 @@ def _estimate_zoom(lat_span: float, lon_span: float) -> float:
     return 9
 
 
+def render_scenario_builder() -> None:
+    """Advanced scenario builder interface."""
+    st.subheader("🎬 Scenario Builder")
+    
+    st.markdown("Build and save custom simulation scenarios with pre-defined ambulances, emergencies, and traffic patterns.")
+    
+    # Scenario presets
+    st.markdown("### 📋 Quick Scenarios")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("🏙️ Urban Rush Hour", use_container_width=True):
+            st.session_state.model.update_random_traffic(2.5)
+            for _ in range(8):
+                add_emergency(urgency=random.randint(3, 5))
+            _add_event_to_timeline("scenario", "Loaded: Urban Rush Hour scenario", "info")
+            st.success("Urban Rush Hour scenario loaded!")
+    
+    with col2:
+        if st.button("🌃 Quiet Night", use_container_width=True):
+            st.session_state.model.update_random_traffic(0.3)
+            for _ in range(2):
+                add_emergency(urgency=random.randint(1, 3))
+            _add_event_to_timeline("scenario", "Loaded: Quiet Night scenario", "info")
+            st.success("Quiet Night scenario loaded!")
+    
+    with col3:
+        if st.button("⚠️ Mass Casualty Event", use_container_width=True):
+            for _ in range(15):
+                add_emergency(urgency=5)
+            _add_event_to_timeline("scenario", "Loaded: Mass Casualty Event scenario", "critical")
+            st.warning("Mass Casualty Event scenario loaded!")
+    
+    # Custom scenario builder
+    st.markdown("---")
+    st.markdown("### ⚙️ Custom Scenario")
+    
+    scenario_col1, scenario_col2 = st.columns(2)
+    
+    with scenario_col1:
+        num_emergencies = st.slider("Number of Emergencies", 1, 20, 3)
+        emergency_urgency_min = st.slider("Min Urgency", 1, 5, 1)
+        emergency_urgency_max = st.slider("Max Urgency", emergency_urgency_min, 5, 5)
+    
+    with scenario_col2:
+        num_ambulances = st.slider("Additional Ambulances", 0, 10, 0)
+        traffic_multiplier = st.slider("Traffic Multiplier", 0.1, 3.0, 1.0, 0.1)
+        
+        if st.button("🚀 Launch Custom Scenario", use_container_width=True):
+            st.session_state.model.update_random_traffic(traffic_multiplier)
+            
+            for _ in range(num_emergencies):
+                urgency = random.randint(emergency_urgency_min, emergency_urgency_max)
+                add_emergency(urgency=urgency)
+            
+            for _ in range(num_ambulances):
+                add_ambulance_unit()
+            
+            _add_event_to_timeline("scenario", f"Custom scenario: {num_emergencies} emergencies, {num_ambulances} ambulances", "info")
+            st.success(f"Custom scenario launched with {num_emergencies} emergencies!")
+    
+    # Export/Import scenarios
+    st.markdown("---")
+    st.markdown("### 💾 Save/Load Scenarios")
+    
+    export_col1, export_col2 = st.columns(2)
+    
+    with export_col1:
+        scenario_data = {
+            "ambulances": len(st.session_state.dispatcher.ambulances),
+            "active_emergencies": st.session_state.sim.active_emergencies(),
+            "traffic_state": "current",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        st.download_button(
+            "📥 Export Current State",
+            data=json.dumps(scenario_data, indent=2),
+            file_name=f"scenario_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+    
+    with export_col2:
+        st.button("📤 Load Scenario", use_container_width=True, disabled=True)
+        st.caption("Feature coming soon")
+
+
 def controls_panel() -> None:
     st.markdown("### 🎛️ Controls Panel")
     col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -547,10 +1064,12 @@ def controls_panel() -> None:
             add_emergency(location=manual_location, urgency=urgency_override)
     if col3.button("Increase Traffic", use_container_width=True):
         st.session_state.model.update_random_traffic(1.5)
+        _add_event_to_timeline("traffic", "Traffic manually increased", "warning")
         st.toast("Traffic congestion increased", icon="🚦")
     if col4.button("Reset Simulation", use_container_width=True):
         st.session_state.clear()
         init_state()
+        _add_event_to_timeline("system", "Simulation reset", "info")
         st.toast("Simulation reset", icon="♻️")
     if col5.button("Show Paths" if not st.session_state.show_paths else "Hide Paths", use_container_width=True):
         st.session_state.show_paths = not st.session_state.show_paths
@@ -560,12 +1079,12 @@ def controls_panel() -> None:
         st.download_button(
             "Export Report",
             data=json.dumps(payload, indent=2),
-            file_name="dispatch_report.json",
+            file_name=f"dispatch_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
             mime="application/json",
             use_container_width=True,
         )
     st.divider()
-    st.markdown("#### Custom Emergency Placement")
+    st.markdown("#### 📍 Custom Emergency Placement")
     manual = st.checkbox("Place emergencies manually", value=st.session_state.manual_emergency)
     st.session_state.manual_emergency = manual
     custom_cols = st.columns([1, 1, 1])
@@ -712,35 +1231,106 @@ def render_assignment_table() -> None:
 
 
 def analytics_tab(sim_snapshot: Dict) -> None:
-    st.subheader("Response Time Trend")
+    st.subheader("📈 Response Time Analysis")
     response_history = sim_snapshot.get("response_history", [])
     if response_history:
         response_df = pd.DataFrame(
             {"Response #": range(1, len(response_history) + 1), "Minutes": response_history}
         )
-        st.line_chart(response_df.set_index("Response #"))
+        
+        # Enhanced chart with Plotly
+        fig_response = go.Figure()
+        fig_response.add_trace(go.Scatter(
+            x=response_df["Response #"],
+            y=response_df["Minutes"],
+            mode='lines+markers',
+            name='Response Time',
+            line=dict(color='#3b82f6', width=3),
+            marker=dict(size=6)
+        ))
+        
+        # Add average line
+        avg_response = response_df["Minutes"].mean()
+        fig_response.add_hline(y=avg_response, line_dash="dash", line_color="#fbbf24",
+                              annotation_text=f"Avg: {avg_response:.2f} min")
+        
+        fig_response.update_layout(
+            xaxis_title="Response Number",
+            yaxis_title="Response Time (minutes)",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#f8fafc'),
+            height=400
+        )
+        st.plotly_chart(fig_response, use_container_width=True)
+        
+        # Statistics
+        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+        stat_col1.metric("Average", f"{avg_response:.2f} min")
+        stat_col2.metric("Best", f"{min(response_history):.2f} min")
+        stat_col3.metric("Worst", f"{max(response_history):.2f} min")
+        stat_col4.metric("Total Responses", len(response_history))
     else:
-        st.info("No completed responses yet. Once ambulances resolve events, trends appear here.")
+        st.info("📊 No completed responses yet. Once ambulances resolve events, detailed analytics will appear here.")
 
-    st.subheader("Distance Covered Over Time")
+    st.markdown("---")
+    st.subheader("🚗 Distance Covered Over Time")
     distance_history = st.session_state.get("distance_history", [])
     if distance_history:
         distance_df = pd.DataFrame(distance_history)
-        st.area_chart(distance_df.set_index("Minutes"))
+        
+        fig_distance = px.area(
+            distance_df, x="Minutes", y="Distance",
+            color_discrete_sequence=['#22c55e']
+        )
+        fig_distance.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#f8fafc'),
+            height=350
+        )
+        st.plotly_chart(fig_distance, use_container_width=True)
+        
+        total_distance = distance_df["Distance"].iloc[-1] if len(distance_df) > 0 else 0
+        st.metric("Total Distance", f"{total_distance:.1f} {sim_snapshot['metrics'].get('distance_units', 'km')}")
     else:
-        st.info("Distance history populates automatically as the simulation runs.")
+        st.info("📍 Distance history populates automatically as the simulation runs.")
 
-    st.subheader("Active Emergencies Over Time")
+    st.markdown("---")
+    st.subheader("🚨 Active Emergencies Over Time")
     active_history = st.session_state.get("active_emergencies_history", [])
     if active_history:
         active_df = pd.DataFrame(active_history)
-        st.line_chart(active_df.set_index("Minutes"))
+        
+        fig_active = go.Figure()
+        fig_active.add_trace(go.Scatter(
+            x=active_df["Minutes"],
+            y=active_df["Active"],
+            mode='lines',
+            fill='tozeroy',
+            line=dict(color='#ef4444', width=2),
+            fillcolor='rgba(239, 68, 68, 0.3)'
+        ))
+        
+        fig_active.update_layout(
+            xaxis_title="Simulation Time (minutes)",
+            yaxis_title="Active Emergencies",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#f8fafc'),
+            height=350
+        )
+        st.plotly_chart(fig_active, use_container_width=True)
+        
+        max_concurrent = max([e["Active"] for e in active_history])
+        st.metric("Peak Concurrent Emergencies", max_concurrent)
     else:
-        st.info("Start the simulation to see active emergency counts.")
+        st.info("🔥 Start the simulation to see active emergency trends.")
 
+    st.markdown("---")
     dispatcher_history = st.session_state.dispatcher.history[-20:]
     if dispatcher_history:
-        st.subheader("Recent Optimization Costs")
+        st.subheader("🎯 Optimization Performance")
         total_runs = len(st.session_state.dispatcher.history)
         start_idx = total_runs - len(dispatcher_history) + 1
         iterations = list(range(start_idx, start_idx + len(dispatcher_history)))
@@ -750,58 +1340,119 @@ def analytics_tab(sim_snapshot: Dict) -> None:
             "Pairs": [len(entry.assignments) for entry in dispatcher_history],
         }
         df = pd.DataFrame(data)
-        st.bar_chart(df.set_index("Iteration")[["Total Cost"]])
+        
+        # Dual-axis chart
+        fig_opt = make_subplots(specs=[[{"secondary_y": True}]])
+        
+        fig_opt.add_trace(
+            go.Bar(x=df["Iteration"], y=df["Total Cost"], name="Total Cost", marker_color='#3b82f6'),
+            secondary_y=False
+        )
+        
+        fig_opt.add_trace(
+            go.Scatter(x=df["Iteration"], y=df["Pairs"], name="Pairs", 
+                      line=dict(color='#22c55e', width=3), mode='lines+markers'),
+            secondary_y=True
+        )
+        
+        fig_opt.update_xaxes(title_text="Iteration")
+        fig_opt.update_yaxes(title_text="Total Cost", secondary_y=False)
+        fig_opt.update_yaxes(title_text="Assignment Pairs", secondary_y=True)
+        
+        fig_opt.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#f8fafc'),
+            height=400
+        )
+        
+        st.plotly_chart(fig_opt, use_container_width=True)
+        
         st.caption(
-            f"Average pairs per run: {sum(data['Pairs']) / len(data['Pairs']):.2f} | "
-            f"Min cost: {min(data['Total Cost']):.1f}"
+            f"📊 Average pairs per run: {sum(data['Pairs']) / len(data['Pairs']):.2f} | "
+            f"Min cost: {min(data['Total Cost']):.1f} | "
+            f"Avg cost: {sum(data['Total Cost']) / len(data['Total Cost']):.1f}"
         )
     else:
-        st.info("Optimization history will appear after the dispatcher assigns ambulances at least once.")
+        st.info("⚡ Optimization history will appear after the dispatcher assigns ambulances at least once.")
 
 
 def sidebar_controls() -> None:
-    st.sidebar.title("Simulation Controls")
+    st.sidebar.title("🎮 Simulation Controls")
+    
+    # Map selection
     map_idx = MAP_CHOICES.index(st.session_state.map_source)
-    selected_map = st.sidebar.selectbox("City Graph", MAP_CHOICES, index=map_idx)
+    selected_map = st.sidebar.selectbox("🗺️ City Graph", MAP_CHOICES, index=map_idx)
     if selected_map != st.session_state.map_source:
         st.session_state.map_source = selected_map
         set_environment(selected_map, st.session_state.route_algo, st.session_state.assignment_method)
+        _add_event_to_timeline("system", f"Switched to {selected_map}", "info")
+    
     st.sidebar.divider()
+    
+    # Algorithm settings
+    st.sidebar.markdown("### ⚙️ Algorithm Configuration")
     route_options = ["dijkstra", "astar"]
     route_idx = route_options.index(st.session_state.route_algo)
-    route_algo = st.sidebar.selectbox("Routing Algorithm", route_options, index=route_idx)
+    route_algo = st.sidebar.selectbox("🛣️ Routing Algorithm", route_options, index=route_idx)
+    
     assignment_options = ["hungarian", "random"]
     assignment_idx = assignment_options.index(st.session_state.assignment_method)
-    assignment_method = st.sidebar.selectbox("Assignment Strategy", assignment_options, index=assignment_idx)
+    assignment_method = st.sidebar.selectbox("🎯 Assignment Strategy", assignment_options, index=assignment_idx)
+    
     speed_options = ["Real-time", "Fast-forward"]
     speed_idx = speed_options.index(st.session_state.speed)
-    speed = st.sidebar.selectbox("Playback Speed", speed_options, index=speed_idx)
+    speed = st.sidebar.selectbox("⏱️ Playback Speed", speed_options, index=speed_idx)
+    
     st.sidebar.divider()
+    
+    # Display settings
+    st.sidebar.markdown("### 🎨 Display Options")
     zoom_manual = st.sidebar.checkbox("Manual Map Zoom", value=st.session_state.map_zoom is not None)
     if zoom_manual:
         default_zoom = st.session_state.map_zoom if st.session_state.map_zoom is not None else 12
         st.session_state.map_zoom = st.sidebar.slider("Zoom Level", min_value=8, max_value=18, value=int(default_zoom))
     else:
         st.session_state.map_zoom = None
+    
+    st.session_state.show_traffic_heatmap = st.sidebar.checkbox("Show Traffic Heatmap", value=st.session_state.show_traffic_heatmap)
+    st.session_state.show_notifications = st.sidebar.checkbox("Show Notifications", value=st.session_state.show_notifications)
+    
+    st.sidebar.divider()
+    
+    # Traffic scenario
+    st.sidebar.markdown("### 🚦 Traffic Control")
     traffic = st.sidebar.selectbox("Traffic Scenario", ["Balanced", "Rush Hour", "Quiet", "Custom"])
+    
+    # Simulation control
+    st.sidebar.divider()
+    st.sidebar.markdown("### ▶️ Simulation")
     running = st.sidebar.toggle("Run Simulation", value=st.session_state.running)
+    
     st.session_state.speed = speed
     st.session_state.running = running
+    
     if route_algo != st.session_state.route_algo or assignment_method != st.session_state.assignment_method:
+        old_algo = st.session_state.route_algo
         st.session_state.route_algo = route_algo
         st.session_state.assignment_method = assignment_method
+        _add_event_to_timeline("system", f"Algorithm changed: {old_algo} → {route_algo}", "info")
+    
     dispatcher: RealtimeDispatcher = st.session_state.dispatcher
     dispatcher.algorithm = st.session_state.route_algo
     dispatcher.method = st.session_state.assignment_method
+    
     if traffic == "Rush Hour":
         st.session_state.model.update_random_traffic(2.0)
     elif traffic == "Quiet":
         st.session_state.model.update_random_traffic(0.3)
 
     st.sidebar.divider()
+    
+    # Ambulance focus
     snap = dispatcher.snapshot()
     amb_options = ["All ambulances"] + [f"Ambulance #{amb['id']}" for amb in snap["ambulances"]]
-    selected = st.sidebar.selectbox("Focus on unit", amb_options)
+    selected = st.sidebar.selectbox("🔍 Focus on unit", amb_options)
     if selected == "All ambulances":
         st.session_state.focus_ambulance = None
     else:
@@ -809,6 +1460,44 @@ def sidebar_controls() -> None:
             st.session_state.focus_ambulance = int(selected.split("#")[1])
         except Exception:
             st.session_state.focus_ambulance = None
+    
+    # Notifications panel
+    st.sidebar.divider()
+    render_notifications()
+    
+    # Help section
+    st.sidebar.divider()
+    with st.sidebar.expander("ℹ️ Help & Info"):
+        st.markdown(r"""
+        **Quick Guide:**
+        
+        🚑 **Ambulances**: Blue markers on map  
+        🚨 **Emergencies**: Red markers (number = urgency)  
+        🟨 **Routes**: Yellow lines show paths  
+        
+        **Algorithms:**
+        - **Dijkstra**: Guaranteed shortest path
+        - **A***: Faster with heuristics
+        
+        **Assignment:**
+        - **Hungarian**: Optimal pairing
+        - **Random**: Baseline comparison
+        
+        **Tips:**
+        - Use scenarios for quick testing
+        - Monitor KPIs for performance
+        - Export reports for analysis
+        - Check timeline for events
+        """)
+        
+        st.markdown("---")
+        st.markdown("**System Status:**")
+        model: GraphModel = st.session_state.model
+        total_nodes = len(model.graph.nodes) if hasattr(model.graph, 'nodes') else 0
+        total_edges = len(model.graph.edges) if hasattr(model.graph, 'edges') else 0
+        st.caption(f"📍 Nodes: {total_nodes}")
+        st.caption(f"🛣️ Edges: {total_edges}")
+        st.caption(f"🗺️ Mode: {'Grid' if model.grid_mode else 'OSM'}")
 
 
 # ------------------------------------------------------------------ #
@@ -818,43 +1507,143 @@ def main() -> None:
     init_state()
     _inject_global_styles()
     sidebar_controls()
-    st.title("🚑 Emergency Ambulance Dispatch Optimization")
-    st.caption("Hybrid graph + assignment algorithms with real-time visualization.")
+    
+    # Header with status indicators
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        st.title("🚑 Emergency Ambulance Dispatch Optimization")
+        st.caption("Advanced real-time dispatch system with AI-powered routing and assignment optimization")
+    with col2:
+        status = "🟢 Running" if st.session_state.running else "⚪ Paused"
+        st.markdown(f"### {status}")
 
-    home_tab, live_tab, analytics_tab_obj = st.tabs(["🏠 Home Dashboard", "🗺️ Live Map Simulation", "📊 Analytics"])
+    # Multi-tab interface
+    home_tab, live_tab, analytics_tab_obj, performance_tab, timeline_tab, traffic_tab, scenario_tab = st.tabs([
+        "🏠 Dashboard", 
+        "🗺️ Live Map", 
+        "📊 Analytics",
+        "⚡ Performance",
+        "📋 Timeline",
+        "🚦 Traffic",
+        "🎬 Scenarios"
+    ])
 
     with home_tab:
-        st.header("Mission Control")
+        st.markdown('<div class="info-card">', unsafe_allow_html=True)
+        st.header("🎯 Mission Control Center")
         st.write(
-            "Start the dispatcher, compare routing strategies, and monitor key performance metrics. "
-            "The system combines Dijkstra/A* routing with Hungarian assignment for optimal response times."
+            "Welcome to the advanced ambulance dispatch optimization system. "
+            "This platform combines cutting-edge algorithms (Dijkstra/A*) with optimal assignment strategies (Hungarian method) "
+            "to minimize emergency response times and save lives."
         )
-        st.image("assets/ambulance_icon.png", width=72)
-        col1, col2 = st.columns(2)
-        col1.button("Start Simulation", on_click=lambda: st.session_state.update({"running": True}), use_container_width=True)
-        col2.button(
-            "Add Initial Emergencies",
-            on_click=lambda: [add_emergency(urgency=random.randint(2, 5)) for _ in range(3)],
-            use_container_width=True,
-        )
-        st.markdown(
-            """
-            **Highlights**
-            - Live assignment updates with urgency-aware queues  
-            - Smooth ambulance animation on a 10×10 city grid  
-            - Analytics comparing random vs optimal strategies  
-            - Exportable reports for further analysis
-            """
-        )
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Quick actions
+        st.subheader("⚡ Quick Actions")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if st.button("▶️ Start Simulation", use_container_width=True):
+                st.session_state.running = True
+                _add_event_to_timeline("system", "Simulation started", "success")
+                
+        with col2:
+            if st.button("⏸️ Pause Simulation", use_container_width=True):
+                st.session_state.running = False
+                _add_event_to_timeline("system", "Simulation paused", "info")
+        
+        with col3:
+            if st.button("➕ Add Emergencies (3x)", use_container_width=True):
+                for _ in range(3):
+                    add_emergency(urgency=random.randint(2, 5))
+        
+        with col4:
+            if st.button("🚑 Add Ambulance", use_container_width=True):
+                add_ambulance_unit()
+        
+        # System overview
+        st.markdown("---")
+        sim_snapshot = st.session_state.sim.snapshot()
+        dispatcher_snapshot = st.session_state.dispatcher.snapshot()
+        render_advanced_kpi_dashboard(sim_snapshot, dispatcher_snapshot)
+        
+        # Live system health
+        st.markdown("---")
+        st.subheader("🏥 System Health Monitor")
+        
+        health_col1, health_col2, health_col3, health_col4 = st.columns(4)
+        
+        # Calculate health metrics
+        total_ambulances = len(dispatcher_snapshot["ambulances"])
+        available = sum(1 for amb in dispatcher_snapshot["ambulances"] if amb["available"])
+        response_time = sim_snapshot["metrics"]["average_response_time"]
+        active_emergencies = st.session_state.sim.active_emergencies()
+        
+        # System health score (0-100)
+        ambulance_score = (available / total_ambulances * 100) if total_ambulances > 0 else 0
+        response_score = max(0, 100 - (response_time * 5))  # Lower time = higher score
+        emergency_score = max(0, 100 - (active_emergencies * 10))  # Fewer emergencies = higher score
+        overall_health = (ambulance_score + response_score + emergency_score) / 3
+        
+        health_status = "🟢 Excellent" if overall_health >= 70 else "🟡 Fair" if overall_health >= 40 else "🔴 Critical"
+        
+        health_col1.metric("Overall Health", f"{overall_health:.0f}%", help="Composite score based on availability, response time, and emergency load")
+        health_col2.metric("System Status", health_status)
+        health_col3.metric("Queue Pressure", f"{active_emergencies}/{total_ambulances}", help="Active emergencies vs available ambulances")
+        
+        # Algorithm efficiency
+        if st.session_state.algorithm_comparison[st.session_state.route_algo]["times"]:
+            avg_time = np.mean(st.session_state.algorithm_comparison[st.session_state.route_algo]["times"]) * 1000
+            health_col4.metric("Algorithm Speed", f"{avg_time:.1f}ms", help="Average algorithm execution time")
+        else:
+            health_col4.metric("Algorithm Speed", "N/A")
+        
+        # Features showcase
+        st.markdown("---")
+        st.subheader("✨ System Capabilities")
+        
+        feat_col1, feat_col2, feat_col3 = st.columns(3)
+        
+        with feat_col1:
+            st.markdown("""
+            **🎯 Smart Routing**
+            - Multiple pathfinding algorithms
+            - Real-time traffic consideration
+            - Dynamic rerouting capabilities
+            - Optimized for speed and accuracy
+            """)
+        
+        with feat_col2:
+            st.markdown("""
+            **📊 Advanced Analytics**
+            - Performance comparison tools
+            - Real-time KPI monitoring
+            - Historical trend analysis
+            - Algorithm benchmarking
+            """)
+        
+        with feat_col3:
+            st.markdown("""
+            **🔔 Real-time Monitoring**
+            - Live event timeline
+            - Priority-based notifications
+            - Traffic heatmap visualization
+            - Fleet status tracking
+            """)
 
     with live_tab:
         controls_panel()
+        
         if st.session_state.running:
             run_steps(20 if st.session_state.speed == "Fast-forward" else 8)
+        
         sim_snapshot = st.session_state.sim.snapshot()
         _log_metric_history(sim_snapshot)
         dispatcher_snapshot = st.session_state.dispatcher.snapshot()
+        
         render_metrics(dispatcher_snapshot, sim_snapshot)
+        
+        # Main map
         st.plotly_chart(
             render_grid(
                 sim_snapshot,
@@ -863,18 +1652,196 @@ def main() -> None:
             ),
             use_container_width=True,
         )
-        legend_cols = st.columns(3)
-        legend_cols[0].markdown("**🟦 Ambulance** – current position")
-        legend_cols[1].markdown("**🟥 Emergency** – active incident")
-        legend_cols[2].markdown("**🟨 Focus** – highlighted unit & route")
-        render_ambulance_status(sim_snapshot)
-        render_assignment_table()
+        
+        # Legend
+        legend_cols = st.columns(4)
+        legend_cols[0].markdown("**🟦 Ambulance** – active unit")
+        legend_cols[1].markdown("**🟥 Emergency** – incident location")
+        legend_cols[2].markdown("**🟨 Focus** – highlighted route")
+        legend_cols[3].markdown("**🟩 Resolved** – completed calls")
+        
+        # Status tables
+        col1, col2 = st.columns(2)
+        with col1:
+            render_ambulance_status(sim_snapshot)
+        with col2:
+            render_assignment_table()
 
     with analytics_tab_obj:
         analytics_tab(sim_snapshot)
 
+    with performance_tab:
+        render_performance_comparison()
+        
+        st.markdown("---")
+        st.subheader("🎯 Optimization Efficiency")
+        
+        history = st.session_state.dispatcher.history
+        if history and len(history) > 5:
+            recent_history = history[-50:]
+            
+            costs = [h.total_cost for h in recent_history]
+            pairs = [len(h.assignments) for h in recent_history]
+            
+            fig = make_subplots(
+                rows=1, cols=2,
+                subplot_titles=("Total Assignment Cost", "Assignments per Iteration")
+            )
+            
+            fig.add_trace(
+                go.Scatter(x=list(range(len(costs))), y=costs, mode='lines+markers', name='Cost'),
+                row=1, col=1
+            )
+            
+            fig.add_trace(
+                go.Bar(x=list(range(len(pairs))), y=pairs, name='Pairs'),
+                row=1, col=2
+            )
+            
+            fig.update_layout(
+                height=400,
+                showlegend=False,
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='#f8fafc')
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Statistics
+            stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+            stat_col1.metric("Avg Cost", f"{np.mean(costs):.2f}")
+            stat_col2.metric("Min Cost", f"{np.min(costs):.2f}")
+            stat_col3.metric("Max Cost", f"{np.max(costs):.2f}")
+            stat_col4.metric("Std Dev", f"{np.std(costs):.2f}")
+        else:
+            st.info("Run the simulation longer to see detailed performance analytics.")
+
+    with timeline_tab:
+        render_event_timeline()
+        
+        # Summary statistics
+        if st.session_state.event_timeline:
+            st.markdown("---")
+            st.subheader("📈 Event Summary")
+            
+            timeline_list = list(st.session_state.event_timeline)
+            severity_counts = {}
+            type_counts = {}
+            
+            for event in timeline_list:
+                severity_counts[event['severity']] = severity_counts.get(event['severity'], 0) + 1
+                type_counts[event['type']] = type_counts.get(event['type'], 0) + 1
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Events by Severity**")
+                severity_df = pd.DataFrame(list(severity_counts.items()), columns=['Severity', 'Count'])
+                fig_severity = px.pie(severity_df, values='Count', names='Severity', 
+                                     color='Severity',
+                                     color_discrete_map={
+                                         'critical': '#ef4444',
+                                         'warning': '#fbbf24',
+                                         'info': '#3b82f6',
+                                         'success': '#22c55e'
+                                     })
+                fig_severity.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#f8fafc'),
+                    height=300
+                )
+                st.plotly_chart(fig_severity, use_container_width=True)
+            
+            with col2:
+                st.markdown("**Events by Type**")
+                type_df = pd.DataFrame(list(type_counts.items()), columns=['Type', 'Count'])
+                fig_type = px.bar(type_df, x='Type', y='Count', color='Type')
+                fig_type.update_layout(
+                    showlegend=False,
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#f8fafc'),
+                    height=300
+                )
+                st.plotly_chart(fig_type, use_container_width=True)
+
+    with traffic_tab:
+        st.subheader("🚦 Traffic Analysis")
+        
+        if st.session_state.show_traffic_heatmap:
+            st.plotly_chart(render_traffic_heatmap(), use_container_width=True)
+        else:
+            st.info("Enable 'Show Traffic Heatmap' in the sidebar to visualize traffic density.")
+        
+        # Traffic controls
+        st.markdown("---")
+        st.subheader("Traffic Simulation Controls")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🚦 Increase Traffic", use_container_width=True):
+                st.session_state.model.update_random_traffic(1.5)
+                _add_event_to_timeline("traffic", "Traffic increased by 50%", "warning")
+                st.toast("Traffic congestion increased", icon="🚦")
+        
+        with col2:
+            if st.button("✅ Normal Traffic", use_container_width=True):
+                st.session_state.model.update_random_traffic(1.0)
+                _add_event_to_timeline("traffic", "Traffic normalized", "info")
+                st.toast("Traffic set to normal levels", icon="✅")
+        
+        with col3:
+            if st.button("⚡ Reduce Traffic", use_container_width=True):
+                st.session_state.model.update_random_traffic(0.5)
+                _add_event_to_timeline("traffic", "Traffic reduced by 50%", "success")
+                st.toast("Traffic congestion reduced", icon="⚡")
+        
+        # Traffic statistics
+        st.markdown("---")
+        st.subheader("📊 Traffic Statistics")
+        
+        model: GraphModel = st.session_state.model
+        if hasattr(model.graph, 'edges'):
+            # Extract numeric weights from edges
+            weights = []
+            for edge_data in model.graph.edges.values():
+                # Handle different data types: dict, float, int
+                if isinstance(edge_data, dict):
+                    weight = edge_data.get('weight', 1.0)
+                elif isinstance(edge_data, (int, float)):
+                    weight = float(edge_data)
+                else:
+                    weight = 1.0
+                weights.append(weight)
+            
+            if weights:
+                stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+                stat_col1.metric("Avg Edge Weight", f"{np.mean(weights):.2f}")
+                stat_col2.metric("Min Weight", f"{np.min(weights):.2f}")
+                stat_col3.metric("Max Weight", f"{np.max(weights):.2f}")
+                stat_col4.metric("Total Edges", len(weights))
+                
+                # Distribution chart
+                fig_dist = go.Figure()
+                fig_dist.add_trace(go.Histogram(x=weights, nbinsx=30, name='Weight Distribution'))
+                fig_dist.update_layout(
+                    title="Edge Weight Distribution",
+                    xaxis_title="Weight",
+                    yaxis_title="Frequency",
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#f8fafc'),
+                    height=400
+                )
+                st.plotly_chart(fig_dist, use_container_width=True)
+
+    with scenario_tab:
+        render_scenario_builder()
+
     if st.session_state.running:
-        st.experimental_rerun()
+        st.rerun()
 
 
 if __name__ == "__main__":
