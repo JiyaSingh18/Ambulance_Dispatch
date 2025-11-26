@@ -29,6 +29,60 @@ st.set_page_config(
     page_icon="🚑",
 )
 
+
+def _inject_global_styles() -> None:
+    """Global CSS to give the app a modern dark dashboard look."""
+    st.markdown(
+        """
+        <style>
+        .main {
+            background: radial-gradient(circle at top left, #1e293b 0, #020617 55%);
+        }
+        section[data-testid="stSidebar"] {
+            background-color: #020617 !important;
+            border-right: 1px solid #1f2933;
+        }
+        .stMetric {
+            background: linear-gradient(135deg, #0f172a, #020617);
+            padding: 0.75rem 0.9rem;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+        }
+        .stMetric label {
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: .12em;
+            color: #9ca3af;
+        }
+        .stMetric [data-testid="stMetricValue"] {
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: #e5e7eb;
+        }
+        div[data-testid="stDataFrame"] {
+            border-radius: 0.75rem;
+            border: 1px solid rgba(148, 163, 184, 0.4);
+            overflow: hidden;
+        }
+        .stButton>button, .stDownloadButton>button {
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            background: radial-gradient(circle at top left, #38bdf8, #0ea5e9);
+            color: #0b1120;
+            font-weight: 600;
+        }
+        .stButton>button:hover, .stDownloadButton>button:hover {
+            border-color: #fbbf24;
+            box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.35);
+        }
+        h1, h2, h3 {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 MAP_CHOICES = ["Grid (10x10)", "Mumbai (OSM)"]
 DEFAULT_MAP = MAP_CHOICES[1]
 MUMBAI_AMBULANCE_COUNT = 91
@@ -258,7 +312,7 @@ def add_ambulance_unit() -> None:
 # ------------------------------------------------------------------ #
 # Rendering helpers
 # ------------------------------------------------------------------ #
-def render_grid(snapshot: Dict, show_paths: bool) -> go.Figure:
+def render_grid(snapshot: Dict, show_paths: bool, focus_ambulance: int | None = None) -> go.Figure:
     model: GraphModel = st.session_state.model
     coords = _coordinate_matrix(model)
     node_xs = coords[:, 0]
@@ -293,6 +347,7 @@ def render_grid(snapshot: Dict, show_paths: bool) -> go.Figure:
             )
         )
         for amb in snapshot["ambulances"]:
+            is_focus = focus_ambulance is not None and amb["id"] == focus_ambulance
             hover = (
                 f"Ambulance {amb['id']}<br>"
                 f"{'Idle' if amb['idle'] else 'Responding'}<br>"
@@ -304,7 +359,10 @@ def render_grid(snapshot: Dict, show_paths: bool) -> go.Figure:
                     lon=[amb["x"]],
                     lat=[amb["y"]],
                     mode="markers+text",
-                    marker=dict(size=18, color="#2b83ba"),
+                    marker=dict(
+                        size=22 if is_focus else 18,
+                        color="#facc15" if is_focus else "#2b83ba",
+                    ),
                     text=[f"🚑 {amb['id']}"],
                     textposition="top center",
                     hovertext=hover,
@@ -320,7 +378,10 @@ def render_grid(snapshot: Dict, show_paths: bool) -> go.Figure:
                         lon=lons,
                         lat=lats,
                         mode="lines",
-                        line=dict(color="#1f78b4", width=4),
+                        line=dict(
+                            color="#facc15" if is_focus else "#1f78b4",
+                            width=6 if is_focus else 4,
+                        ),
                         name=f"Route {amb['id']}",
                         hoverinfo="text",
                         hovertext=[
@@ -381,6 +442,7 @@ def render_grid(snapshot: Dict, show_paths: bool) -> go.Figure:
         )
     )
     for amb in snapshot["ambulances"]:
+        is_focus = focus_ambulance is not None and amb["id"] == focus_ambulance
         hover = (
             f"Ambulance {amb['id']}<br>"
             f"{'Idle' if amb['idle'] else 'Responding'}<br>"
@@ -392,7 +454,10 @@ def render_grid(snapshot: Dict, show_paths: bool) -> go.Figure:
                 x=[amb["x"]],
                 y=[amb["y"]],
                 mode="markers+text",
-                marker=dict(size=18, color="#2b83ba"),
+                marker=dict(
+                    size=22 if is_focus else 18,
+                    color="#facc15" if is_focus else "#2b83ba",
+                ),
                 text=[f"🚑 {amb['id']}"],
                 textposition="top center",
                 name=f"Ambulance {amb['id']}",
@@ -408,7 +473,10 @@ def render_grid(snapshot: Dict, show_paths: bool) -> go.Figure:
                     x=path_xs,
                     y=path_ys,
                     mode="lines",
-                    line=dict(color="#1f78b4", width=3),
+                    line=dict(
+                        color="#facc15" if is_focus else "#1f78b4",
+                        width=5 if is_focus else 3,
+                    ),
                     showlegend=False,
                 )
             )
@@ -771,6 +839,9 @@ def main() -> None:
 
     with analytics_tab_obj:
         analytics_tab(sim_snapshot)
+
+    if st.session_state.running:
+        st.experimental_rerun()
 
 
 if __name__ == "__main__":

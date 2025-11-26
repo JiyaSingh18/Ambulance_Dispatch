@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import heapq
+import math
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -48,11 +49,13 @@ class RealtimeDispatcher:
         ambulances: List[AmbulanceState],
         algorithm: str = "dijkstra",
         method: str = "hungarian",
+        candidate_limit: int = 30,
     ) -> None:
         self.graph = graph
         self.ambulances = ambulances
         self.algorithm = algorithm
         self.method = method
+        self.candidate_limit = candidate_limit
         self.emergency_queue: List[Emergency] = []
         self.active_assignments: Dict[int, int] = {}  # ambulance_id -> emergency_id
         self.assignment_paths: Dict[int, List[Point]] = {}
@@ -103,8 +106,9 @@ class RealtimeDispatcher:
             self._remove_resolved_emergencies(assigned_ids)
             return
 
+        candidate_available = self._select_candidate_ambulances(remaining_available, pending)
         emergency_positions = [e.location for e in pending]
-        ambulance_positions = [a.position for a in remaining_available]
+        ambulance_positions = [a.position for a in candidate_available]
         if not ambulance_positions:
             # No one left to assign immediately
             self._remove_resolved_emergencies(assigned_ids)
@@ -115,11 +119,11 @@ class RealtimeDispatcher:
             emergency_positions,
             self.algorithm,
             self.method,
-            ambulance_labels=[amb.id for amb in remaining_available],
+            ambulance_labels=[amb.id for amb in candidate_available],
             emergency_labels=[e.id for e in pending],
         )
         self.history.append(result)
-        for idx_in_available, ambulance in enumerate(remaining_available):
+        for idx_in_available, ambulance in enumerate(candidate_available):
             if idx_in_available not in result.assignments:
                 continue
             emergency_index = result.assignments[idx_in_available]
@@ -177,18 +181,19 @@ class RealtimeDispatcher:
     # ------------------------------------------------------------------ #
     def _plan_future_assignments(self, pending: List[Emergency]) -> None:
         emergency_positions = [e.location for e in pending]
-        ambulance_positions = [self._projected_position(a) for a in self.ambulances]
+        candidate_ambulances = self._select_candidate_ambulances(self.ambulances, pending)
+        ambulance_positions = [self._projected_position(a) for a in candidate_ambulances]
         result = assign_ambulances(
             self.graph,
             ambulance_positions,
             emergency_positions,
             self.algorithm,
             self.method,
-            ambulance_labels=[amb.id for amb in self.ambulances],
+            ambulance_labels=[amb.id for amb in candidate_ambulances],
             emergency_labels=[e.id for e in pending],
         )
         for amb_idx, emergency_idx in result.assignments.items():
-            ambulance_id = self.ambulances[amb_idx].id
+            ambulance_id = candidate_ambulances[amb_idx].id
             emergency_id = pending[emergency_idx].id
             self.future_plan[ambulance_id] = emergency_id
             self.planned_paths[(ambulance_id, emergency_id)] = result.path_lookup[(amb_idx, emergency_idx)]
@@ -216,4 +221,19 @@ class RealtimeDispatcher:
         if travel_time is None:
             travel_time = max(len(path) - 1, 1.0)
         ambulance.busy_until = time.time() + travel_time
+
+    def _select_candidate_ambulances(
+        self, ambulances: List[AmbulanceState], emergencies: List[Emergency]
+    ) -> List[AmbulanceState]:
+        if len(ambulances) <= self.candidate_limit or not emergencies:
+            return ambulances
+        targets = [e.location for e in emergencies]
+        if not targets:
+            return ambulances[: self.candidate_limit]
+
+        def score(ambulance: AmbulanceState) -> float:
+            return min(math.dist(ambulance.position, loc) for loc in targets)
+
+        sorted_candidates = sorted(ambulances, key=score)
+        return sorted_candidates[: self.candidate_limit]
 
