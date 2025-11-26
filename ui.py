@@ -625,19 +625,19 @@ def render_performance_comparison() -> None:
         else:
             st.info("Performance data will appear after running simulations.")
     
-    # Cost comparison
+    # Travel time comparison
     with col2:
-        st.markdown("**Average Assignment Cost**")
+        st.markdown("**Average Travel Time**")
         cost_data = []
         for algo, data in comparison.items():
             if data["costs"]:
                 avg_cost = np.mean(data["costs"])
-                cost_data.append({"Algorithm": algo.upper(), "Avg Cost": avg_cost})
+                cost_data.append({"Algorithm": algo.upper(), "Avg Time": avg_cost})
         
         if cost_data:
             df_cost = pd.DataFrame(cost_data)
             fig_cost = px.bar(
-                df_cost, x='Algorithm', y='Avg Cost',
+                df_cost, x='Algorithm', y='Avg Time',
                 color='Algorithm',
                 color_discrete_map={'DIJKSTRA': '#3b82f6', 'ASTAR': '#22c55e'}
             )
@@ -650,7 +650,7 @@ def render_performance_comparison() -> None:
             )
             st.plotly_chart(fig_cost, use_container_width=True)
         else:
-            st.info("Cost data will appear after running simulations.")
+            st.info("Travel time data will appear after running simulations.")
     
     # Performance over time
     st.markdown("**Performance Trend Over Time**")
@@ -1116,7 +1116,7 @@ def render_metrics(dispatch_snapshot: Dict, sim_snapshot: Dict) -> None:
     col4.metric("Available Ambulances", f"{available}/{len(dispatch_snapshot['ambulances'])}")
     if latest:
         st.caption(
-            f"Latest optimization: {latest.method.title()} (Cost {latest.total_cost:.2f}, "
+            f"Latest optimization: {latest.method.title()} (Total Time: {latest.total_cost:.1f} min, "
             f"{len(latest.assignments)} pairs)"
         )
 
@@ -1197,11 +1197,11 @@ def render_assignment_table() -> None:
         return
     latest = history[-1]
     if not latest.cost_matrix:
-        st.warning("Waiting for sufficient emergencies to build a cost matrix.")
+        st.warning("Waiting for sufficient emergencies to build a travel time matrix.")
         return
     cost_df = pd.DataFrame(latest.cost_matrix, columns=[f"E{j+1}" for j in range(len(latest.cost_matrix[0]))])
     cost_df.index = [f"A{i+1}" for i in range(len(cost_df))]
-    st.subheader(f"Cost Matrix ({latest.method.title()} strategy)")
+    st.subheader(f"Travel Time Matrix ({latest.method.title()} strategy)")
     st.dataframe(cost_df.style.highlight_min(axis=1, color="#14532d"))
     amb_labels = latest.ambulance_labels or []
     emg_labels = latest.emergency_labels or []
@@ -1220,7 +1220,7 @@ def render_assignment_table() -> None:
             {
                 "Ambulance": f"#{amb_label}",
                 "Emergency": emg_label,
-                "Travel Cost": f"{cost:.1f}",
+                "Travel Time (min)": f"{cost:.1f}",
             }
         )
     if pair_rows:
@@ -1336,7 +1336,7 @@ def analytics_tab(sim_snapshot: Dict) -> None:
         iterations = list(range(start_idx, start_idx + len(dispatcher_history)))
         data = {
             "Iteration": iterations,
-            "Total Cost": [entry.total_cost for entry in dispatcher_history],
+            "Total Time": [entry.total_cost for entry in dispatcher_history],
             "Pairs": [len(entry.assignments) for entry in dispatcher_history],
         }
         df = pd.DataFrame(data)
@@ -1345,7 +1345,7 @@ def analytics_tab(sim_snapshot: Dict) -> None:
         fig_opt = make_subplots(specs=[[{"secondary_y": True}]])
         
         fig_opt.add_trace(
-            go.Bar(x=df["Iteration"], y=df["Total Cost"], name="Total Cost", marker_color='#3b82f6'),
+            go.Bar(x=df["Iteration"], y=df["Total Time"], name="Total Response Time", marker_color='#3b82f6'),
             secondary_y=False
         )
         
@@ -1356,7 +1356,7 @@ def analytics_tab(sim_snapshot: Dict) -> None:
         )
         
         fig_opt.update_xaxes(title_text="Iteration")
-        fig_opt.update_yaxes(title_text="Total Cost", secondary_y=False)
+        fig_opt.update_yaxes(title_text="Total Response Time (min)", secondary_y=False)
         fig_opt.update_yaxes(title_text="Assignment Pairs", secondary_y=True)
         
         fig_opt.update_layout(
@@ -1370,8 +1370,8 @@ def analytics_tab(sim_snapshot: Dict) -> None:
         
         st.caption(
             f"📊 Average pairs per run: {sum(data['Pairs']) / len(data['Pairs']):.2f} | "
-            f"Min cost: {min(data['Total Cost']):.1f} | "
-            f"Avg cost: {sum(data['Total Cost']) / len(data['Total Cost']):.1f}"
+            f"Min time: {min(data['Total Time']):.1f} min | "
+            f"Avg time: {sum(data['Total Time']) / len(data['Total Time']):.1f} min"
         )
     else:
         st.info("⚡ Optimization history will appear after the dispatcher assigns ambulances at least once.")
@@ -1685,11 +1685,11 @@ def main() -> None:
             
             fig = make_subplots(
                 rows=1, cols=2,
-                subplot_titles=("Total Assignment Cost", "Assignments per Iteration")
+                subplot_titles=("Total Response Time", "Assignments per Iteration")
             )
             
             fig.add_trace(
-                go.Scatter(x=list(range(len(costs))), y=costs, mode='lines+markers', name='Cost'),
+                go.Scatter(x=list(range(len(costs))), y=costs, mode='lines+markers', name='Response Time'),
                 row=1, col=1
             )
             
@@ -1710,9 +1710,9 @@ def main() -> None:
             
             # Statistics
             stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
-            stat_col1.metric("Avg Cost", f"{np.mean(costs):.2f}")
-            stat_col2.metric("Min Cost", f"{np.min(costs):.2f}")
-            stat_col3.metric("Max Cost", f"{np.max(costs):.2f}")
+            stat_col1.metric("Avg Time", f"{np.mean(costs):.2f} min")
+            stat_col2.metric("Min Time", f"{np.min(costs):.2f} min")
+            stat_col3.metric("Max Time", f"{np.max(costs):.2f} min")
             stat_col4.metric("Std Dev", f"{np.std(costs):.2f}")
         else:
             st.info("Run the simulation longer to see detailed performance analytics.")
