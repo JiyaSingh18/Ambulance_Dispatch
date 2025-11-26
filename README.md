@@ -37,12 +37,6 @@ ambulance_dispatch/
 2. **Live Map Simulation** – Mumbai Mapbox tiles with road overlays (or 10×10 grid), 91 ambulances in city mode, red emergencies, live metrics, cost matrix, active pairing table, and fully interactive control panel.
 3. **Analytics** – Streamlit charts: random vs optimal bars, Dijkstra vs A* line chart, fairness histogram, traffic heatmap.
 
-> _Screenshots_: replace the placeholders below with your own captures.
->
-> - `assets/screens/home_placeholder.png`
-> - `assets/screens/live_placeholder.png`
-> - `assets/screens/analytics_placeholder.png`
-
 - **Graph Modeling**: NetworkX grid graph with per-edge traffic × distance weights, or OSMnx-powered ingestion of Mumbai’s drivable graph. `GraphModel` exposes scenario generation, dynamic traffic updates, heatmap exports, and coordinate lookups for manual incident placement.
 - **Routing**: `routing.compute_shortest_path` for Dijkstra/A*; `route_cost_matrix` provides both cost matrix and per-pair path cache.
 - **Assignment**: `assignment.assign_ambulances` orchestrates cost matrix creation and selects either Hungarian (SciPy) or random matching. `AssignmentResult` stores paths for downstream visualization.
