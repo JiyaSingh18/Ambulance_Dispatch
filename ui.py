@@ -608,6 +608,15 @@ def render_ambulance_status(sim_snapshot: Dict) -> None:
         st.info("No ambulances deployed yet.")
         return
     model: GraphModel = st.session_state.model
+    status_filter = st.radio(
+        "Filter units",
+        ["All", "Idle", "Responding"],
+        index=0,
+        horizontal=True,
+    )
+    if status_filter != "All":
+        want_idle = status_filter == "Idle"
+        ambulances = [a for a in ambulances if a["idle"] == want_idle]
     rows = []
     for amb in ambulances:
         status = "Idle" if amb["idle"] else "Responding"
@@ -789,12 +798,25 @@ def sidebar_controls() -> None:
     elif traffic == "Quiet":
         st.session_state.model.update_random_traffic(0.3)
 
+    st.sidebar.divider()
+    snap = dispatcher.snapshot()
+    amb_options = ["All ambulances"] + [f"Ambulance #{amb['id']}" for amb in snap["ambulances"]]
+    selected = st.sidebar.selectbox("Focus on unit", amb_options)
+    if selected == "All ambulances":
+        st.session_state.focus_ambulance = None
+    else:
+        try:
+            st.session_state.focus_ambulance = int(selected.split("#")[1])
+        except Exception:
+            st.session_state.focus_ambulance = None
+
 
 # ------------------------------------------------------------------ #
 # Layout
 # ------------------------------------------------------------------ #
 def main() -> None:
     init_state()
+    _inject_global_styles()
     sidebar_controls()
     st.title("🚑 Emergency Ambulance Dispatch Optimization")
     st.caption("Hybrid graph + assignment algorithms with real-time visualization.")
@@ -833,7 +855,18 @@ def main() -> None:
         _log_metric_history(sim_snapshot)
         dispatcher_snapshot = st.session_state.dispatcher.snapshot()
         render_metrics(dispatcher_snapshot, sim_snapshot)
-        st.plotly_chart(render_grid(sim_snapshot, st.session_state.show_paths), use_container_width=True)
+        st.plotly_chart(
+            render_grid(
+                sim_snapshot,
+                st.session_state.show_paths,
+                focus_ambulance=st.session_state.get("focus_ambulance"),
+            ),
+            use_container_width=True,
+        )
+        legend_cols = st.columns(3)
+        legend_cols[0].markdown("**🟦 Ambulance** – current position")
+        legend_cols[1].markdown("**🟥 Emergency** – active incident")
+        legend_cols[2].markdown("**🟨 Focus** – highlighted unit & route")
         render_ambulance_status(sim_snapshot)
         render_assignment_table()
 
