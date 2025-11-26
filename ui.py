@@ -17,12 +17,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from analytics import (
-    algorithm_timing_series,
-    compare_response_strategies,
-    fairness_distribution,
-    traffic_heatmap_data,
-)
 from graph_model import GraphModel, GridNode
 from realtime import AmbulanceState, RealtimeDispatcher
 from simulation import SimulationEngine
@@ -92,6 +86,21 @@ def _manual_emergency_node() -> GridNode | None:
         st.warning("Invalid manual emergency coordinates; using random location instead.")
         return None
     return model.closest_node(target)
+
+
+def _log_metric_history(sim_snapshot: Dict) -> None:
+    metrics = sim_snapshot["metrics"]
+    minute_mark = metrics.get("sim_time_minutes", 0.0)
+    distance_history = st.session_state.setdefault("distance_history", [])
+    distance_history.append(
+        {"Minutes": minute_mark, "Distance": metrics.get("distance_display", 0.0)}
+    )
+    if len(distance_history) > 300:
+        distance_history.pop(0)
+    active_history = st.session_state.setdefault("active_emergencies_history", [])
+    active_history.append({"Minutes": minute_mark, "Active": st.session_state.sim.active_emergencies()})
+    if len(active_history) > 300:
+        active_history.pop(0)
 
 
 # ------------------------------------------------------------------ #
@@ -508,13 +517,12 @@ def controls_panel() -> None:
 def render_metrics(dispatch_snapshot: Dict, sim_snapshot: Dict) -> None:
     history = st.session_state.dispatcher.history
     latest = history[-1] if history else None
-    response_time = sim_snapshot["metrics"]["average_response_time"]
+    metrics = sim_snapshot["metrics"]
+    response_time = metrics["average_response_time"]
     distance_units = "blocks" if st.session_state.model.grid_mode else "km"
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Current Response Time", f"{response_time:.2f} min")
-    distance_display = sim_snapshot["metrics"]["distance_travelled"]
-    if not st.session_state.model.grid_mode:
-        distance_display /= 1000.0
+    distance_display = metrics.get("distance_display", 0.0)
     col2.metric("Distance Covered", f"{distance_display:.1f} {distance_units}")
     col3.metric("Active Emergencies", st.session_state.sim.active_emergencies())
     available = sum(1 for amb in dispatch_snapshot["ambulances"] if amb["available"])
@@ -567,15 +575,19 @@ def render_assignment_table() -> None:
         details = active_lookup.get(emergency_id)
         urgency = details["urgency"] if details else "—"
         coords = details["location"] if details else None
-        coord_str = (
-            f"{coords[1]:.3f}°, {coords[0]:.3f}°" if coords and not st.session_state.model.grid_mode else coords
-        )
+        if coords:
+            if st.session_state.model.grid_mode:
+                coord_str = f"{coords[0]:.1f}, {coords[1]:.1f}"
+            else:
+                coord_str = f"{coords[1]:.3f}°, {coords[0]:.3f}°"
+        else:
+            coord_str = "—"
         active_rows.append(
             {
                 "Ambulance": f"#{amb_id}",
                 "Emergency": emergency_id,
                 "Urgency": urgency,
-                "Location": coord_str or "—",
+                "Location": coord_str,
             }
         )
     if active_rows:
@@ -622,32 +634,52 @@ def render_assignment_table() -> None:
         st.info("No optimal pairs computed yet—waiting on additional emergencies or free ambulances.")
 
 
-def analytics_tab() -> None:
-    response_df = compare_response_strategies()
-    st.subheader("Random vs Optimal Response Time")
-    st.bar_chart(response_df.set_index("Scenario"))
+def analytics_tab(sim_snapshot: Dict) -> None:
+    st.subheader("Response Time Trend")
+    response_history = sim_snapshot.get("response_history", [])
+    if response_history:
+        response_df = pd.DataFrame(
+            {"Response #": range(1, len(response_history) + 1), "Minutes": response_history}
+        )
+        st.line_chart(response_df.set_index("Response #"))
+    else:
+        st.info("No completed responses yet. Once ambulances resolve events, trends appear here.")
 
-    timing_df = algorithm_timing_series()
-    st.subheader("Dijkstra vs A* Execution Time")
-    st.line_chart(timing_df.set_index("Step"))
+    st.subheader("Distance Covered Over Time")
+    distance_history = st.session_state.get("distance_history", [])
+    if distance_history:
+        distance_df = pd.DataFrame(distance_history)
+        st.area_chart(distance_df.set_index("Minutes"))
+    else:
+        st.info("Distance history populates automatically as the simulation runs.")
 
-    fairness = fairness_distribution()
-    st.subheader("Ambulance Fairness Distribution")
-    st.bar_chart(fairness.value_counts().sort_index())
+    st.subheader("Active Emergencies Over Time")
+    active_history = st.session_state.get("active_emergencies_history", [])
+    if active_history:
+        active_df = pd.DataFrame(active_history)
+        st.line_chart(active_df.set_index("Minutes"))
+    else:
+        st.info("Start the simulation to see active emergency counts.")
 
-    heatmap = traffic_heatmap_data(st.session_state.model.to_heatmap())
-    st.subheader("Traffic Heatmap")
-    st.plotly_chart(
-        go.Figure(
-            data=go.Heatmap(
-                z=heatmap["z"],
-                x=heatmap["x"],
-                y=heatmap["y"],
-                colorscale="Inferno",
-            )
-        ),
-        use_container_width=True,
-    )
+    dispatcher_history = st.session_state.dispatcher.history[-20:]
+    if dispatcher_history:
+        st.subheader("Recent Optimization Costs")
+        total_runs = len(st.session_state.dispatcher.history)
+        start_idx = total_runs - len(dispatcher_history) + 1
+        iterations = list(range(start_idx, start_idx + len(dispatcher_history)))
+        data = {
+            "Iteration": iterations,
+            "Total Cost": [entry.total_cost for entry in dispatcher_history],
+            "Pairs": [len(entry.assignments) for entry in dispatcher_history],
+        }
+        df = pd.DataFrame(data)
+        st.bar_chart(df.set_index("Iteration")[["Total Cost"]])
+        st.caption(
+            f"Average pairs per run: {sum(data['Pairs']) / len(data['Pairs']):.2f} | "
+            f"Min cost: {min(data['Total Cost']):.1f}"
+        )
+    else:
+        st.info("Optimization history will appear after the dispatcher assigns ambulances at least once.")
 
 
 def sidebar_controls() -> None:
@@ -730,6 +762,7 @@ def main() -> None:
         if st.session_state.running:
             run_steps(20 if st.session_state.speed == "Fast-forward" else 8)
         sim_snapshot = st.session_state.sim.snapshot()
+        _log_metric_history(sim_snapshot)
         dispatcher_snapshot = st.session_state.dispatcher.snapshot()
         render_metrics(dispatcher_snapshot, sim_snapshot)
         st.plotly_chart(render_grid(sim_snapshot, st.session_state.show_paths), use_container_width=True)
@@ -737,7 +770,7 @@ def main() -> None:
         render_assignment_table()
 
     with analytics_tab_obj:
-        analytics_tab()
+        analytics_tab(sim_snapshot)
 
 
 if __name__ == "__main__":

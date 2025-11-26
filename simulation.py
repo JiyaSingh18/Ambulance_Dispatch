@@ -84,11 +84,14 @@ class SimulationEngine:
         self.metrics: Dict[str, float] = {
             "distance_travelled": 0.0,
             "responses": 0,
-            "average_response_time": 0.0,
+            "average_response_time": 0.0,  # minutes
         }
+        self.response_history: List[float] = []  # minutes
         self._emergency_counter = itertools.count(1)
         self._ambulance_counter = itertools.count(1)
         self.random = random.Random(99)
+        self.sim_time = 0.0  # seconds
+        self._default_speed = 3.0 if self.model.grid_mode else 15.0  # ~54 km/h in OSM mode
 
     # ------------------------------------------------------------------ #
     # Setup helpers
@@ -104,6 +107,7 @@ class SimulationEngine:
                     id=next(self._ambulance_counter),
                     position=(float(spot[0]), float(spot[1])),
                     color=_color_for_index(idx),
+                    speed=self._default_speed,
                 )
             )
 
@@ -114,6 +118,7 @@ class SimulationEngine:
             id=next(self._ambulance_counter),
             position=(float(position[0]), float(position[1])),
             color=_color_for_index(idx),
+            speed=self._default_speed,
         )
         self.ambulances.append(ambulance)
         return ambulance
@@ -124,7 +129,7 @@ class SimulationEngine:
         emergency = EmergencyEvent(
             id=next(self._emergency_counter),
             location=location,
-            reported_at=time.time(),
+            reported_at=self.sim_time,
             urgency=urgency,
         )
         self.emergencies[emergency.id] = emergency
@@ -140,6 +145,7 @@ class SimulationEngine:
 
     def tick(self, dt: float = 0.2) -> List[int]:
         completed: List[int] = []
+        self.sim_time += dt
         for ambulance in self.ambulances:
             old_position = ambulance.position
             finished = ambulance.step(dt)
@@ -147,7 +153,7 @@ class SimulationEngine:
             if finished and ambulance.assignment_id is not None:
                 event = self.emergencies.get(ambulance.assignment_id)
                 if event and event.resolved_at is None:
-                    event.resolved_at = time.time()
+                    event.resolved_at = self.sim_time
                     self.metrics["responses"] += 1
                     self._update_response_average(event.resolved_at - event.reported_at)
                 completed.append(ambulance.id)
@@ -176,6 +182,9 @@ class SimulationEngine:
                     "eta_minutes": self._eta_minutes(remaining_raw, amb.speed),
                 }
             )
+        distance_units = "blocks" if self.model.grid_mode else "km"
+        distance_value = self.metrics["distance_travelled"]
+        display_distance = distance_value if self.model.grid_mode else distance_value / 1000.0
         return {
             "ambulances": ambulances_payload,
             "emergencies": [
@@ -188,7 +197,13 @@ class SimulationEngine:
                 }
                 for event in self.emergencies.values()
             ],
-            "metrics": self.metrics.copy(),
+            "metrics": {
+                **self.metrics,
+                "distance_display": display_distance,
+                "distance_units": distance_units,
+                "sim_time_minutes": self.sim_time / 60.0,
+            },
+            "response_history": self.response_history[-200:],
         }
 
     def active_emergencies(self) -> int:
@@ -206,8 +221,10 @@ class SimulationEngine:
     def _update_response_average(self, latest: float) -> None:
         responses = self.metrics["responses"]
         current_avg = self.metrics["average_response_time"]
-        new_avg = ((responses - 1) * current_avg + latest) / responses if responses else latest
+        latest_minutes = latest / 60.0
+        new_avg = ((responses - 1) * current_avg + latest_minutes) / responses if responses else latest_minutes
         self.metrics["average_response_time"] = new_avg
+        self.response_history.append(latest_minutes)
 
     def _normalize_path(self, ambulance: Ambulance, path: List[Point]) -> List[Point]:
         if not path:
